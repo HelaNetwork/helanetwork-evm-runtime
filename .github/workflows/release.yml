@@ -1,0 +1,67 @@
+# NOTE: This name appears in GitHub's Checks API and in workflow's status badge.
+name: release
+
+# Trigger the workflow when:
+on:
+  # A push occurs to one of the matched tags.
+  push:
+    tags:
+      # Pattern that roughly matches Cipher ParaTime's version tags.
+      # For more details on GitHub Actions' pattern match syntax, see:
+      # https://help.github.com/en/actions/automating-your-workflow-with-github-actions/workflow-syntax-for-github-actions#patterns-to-match-branches-and-tags.
+      - 'v[0-9]+.[0-9]+*'
+
+jobs:
+
+  prepare-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Go 1.18
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.18.x"
+
+      - name: Build tagged release, elf, debug
+        id: build-debug-elf
+        uses: oasisprotocol/oasis-sdk/.github/actions/hash-rust@main
+        with:
+          image: oasisprotocol/runtime-builder:main
+          pkg-dirs: runtime
+          binaries: emerald-paratime
+          clean: no
+          setup: |
+            export OASIS_UNSAFE_USE_LOCALNET_CHAINID=1
+
+      - name: Create the debug Oasis Runtime Container
+        run: |
+          go install github.com/oasisprotocol/oasis-sdk/tools/orc@latest
+          pushd runtime
+          orc init ${RUNTIME_EXECUTABLE} --output ../localnet-emerald-paratime.orc
+          popd
+        env:
+          RUNTIME_EXECUTABLE: ${{ github.workspace }}/${{ steps.build-debug-elf.outputs.build-path }}/emerald-paratime
+
+      - name: Build tagged release, elf
+        id: build-elf
+        uses: oasisprotocol/oasis-sdk/.github/actions/hash-rust@main
+        with:
+          image: oasisprotocol/runtime-builder:main
+          binaries: emerald-paratime
+          clean: no
+
+      - name: Create the Oasis Runtime Container
+        run: |
+          go install github.com/oasisprotocol/oasis-sdk/tools/orc@latest
+          orc init ${RUNTIME_EXECUTABLE}
+        env:
+          RUNTIME_EXECUTABLE: ${{ github.workspace }}/${{ steps.build-elf.outputs.build-path }}/emerald-paratime
+
+      - name: Publish the release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: emerald-paratime.orc,localnet-emerald-paratime.orc
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: true
